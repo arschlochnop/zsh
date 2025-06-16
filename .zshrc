@@ -241,13 +241,45 @@ function git_status() {
         # 获取当前分支名
         local branch=$(git symbolic-ref --short HEAD 2>/dev/null)
         if [ -n "$branch" ]; then
+            # 初始化状态变量
+            local git_status_str=""
+            local staged=0
+            local modified=0
+            local untracked=0
+            local ahead=0
+            local behind=0
+            
             # 检查是否有未提交的更改
-            local git_changes=""
-            if [ -n "$(git status --porcelain)" ]; then
-                git_changes="%F{red}*%f"  # 红色星号表示有未提交的更改
+            while IFS= read -r line; do
+                case "$line" in
+                    "M  "*|"A  "*|"D  "*|"R  "*) ((staged++)) ;;    # 已暂存的更改
+                    " M "*|" A "*|" D "*|" R "*) ((modified++)) ;;  # 未暂存的更改
+                    "?? "*) ((untracked++)) ;;                      # 未跟踪的文件
+                esac
+            done < <(git status --porcelain 2>/dev/null)
+            
+            # 检查与远程分支的差异
+            local remote_info=$(git rev-list --count --left-right @{upstream}...HEAD 2>/dev/null)
+            if [ -n "$remote_info" ]; then
+                local behind_count=$(echo $remote_info | cut -f1)
+                local ahead_count=$(echo $remote_info | cut -f2)
+                [ "$behind_count" -gt 0 ] && behind=$behind_count
+                [ "$ahead_count" -gt 0 ] && ahead=$ahead_count
             fi
+            
+            # 构建状态字符串
+            [ $staged -gt 0 ] && git_status_str+="%F{green}●$staged%f"      # 绿色圆点表示已暂存
+            [ $modified -gt 0 ] && git_status_str+="%F{yellow}●$modified%f" # 黄色圆点表示已修改
+            [ $untracked -gt 0 ] && git_status_str+="%F{red}●$untracked%f"  # 红色圆点表示未跟踪
+            [ $ahead -gt 0 ] && git_status_str+="%F{blue}↑$ahead%f"         # 蓝色上箭头表示领先
+            [ $behind -gt 0 ] && git_status_str+="%F{blue}↓$behind%f"       # 蓝色下箭头表示落后
+            
             # 返回格式化的分支信息
-            echo " %F{green}[on   $branch]$git_changes%f"
+            if [ -n "$git_status_str" ]; then
+                echo "[%F{green}⎇ $branch%f ($git_status_str%f)]"
+            else
+                echo "[%F{green}⎇ $branch%f]"
+            fi
         fi
     fi
 }
@@ -273,10 +305,10 @@ configure_prompt() {
         twoline)
             if [[ "$OSTYPE" == "darwin"* ]]; then
                 # macOS 特定的提示符样式
-                PROMPT=$'%F{%(#.blue.green)}┌──${VIRTUAL_ENV:+($(basename $VIRTUAL_ENV))─}(%B%F{%(#.red.blue)}%n'$prompt_symbol$'%m%b%F{%(#.blue.green)})-[%B%F{reset}%(6~.%-1~/…/%4~.%5~)%b%F{%(#.blue.green)}] $(git_status)\n└─%B%(#.%F{red}#.%F{blue}$)%b%F{reset} '
+                PROMPT=$'%F{%(#.blue.green)}┌──${VIRTUAL_ENV:+($(basename $VIRTUAL_ENV))─}(%B%F{%(#.red.blue)}%n'$prompt_symbol$'%m%b%F{%(#.blue.green)})-[%B%F{reset}%(6~.%-1~/…/%4~.%5~)%b%F{%(#.blue.green)}]-$(git_status)\n└─%B%(#.%F{red}#.%F{blue}$)%b%F{reset} '
             else
                 # Linux 提示符样式
-                PROMPT=$'%F{%(#.blue.green)}┌──${debian_chroot:+(${debian_chroot})─}${VIRTUAL_ENV:+($(basename $VIRTUAL_ENV))─}(%B%F{%(#.red.blue)}%n'$prompt_symbol$'%m%b%F{%(#.blue.green)})-[%B%F{reset}%(6~.%-1~/…/%4~.%5~)%b%F{%(#.blue.green)}] $(git_status)\n└─%B%(#.%F{red}#.%F{blue}$)%b%F{reset} '
+                PROMPT=$'%F{%(#.blue.green)}┌──${debian_chroot:+(${debian_chroot})─}${VIRTUAL_ENV:+($(basename $VIRTUAL_ENV))─}(%B%F{%(#.red.blue)}%n'$prompt_symbol$'%m%b%F{%(#.blue.green)})-[%B%F{reset}%(6~.%-1~/…/%4~.%5~)%b%F{%(#.blue.green)}]-$(git_status)\n└─%B%(#.%F{red}#.%F{blue}$)%b%F{reset} '
             fi
             ;;
         oneline)
